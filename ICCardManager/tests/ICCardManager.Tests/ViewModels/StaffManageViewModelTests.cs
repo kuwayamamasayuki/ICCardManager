@@ -101,7 +101,8 @@ public class StaffManageViewModelTests : IDisposable
             messenger,
             _dispatcher,
             _timerFactory,
-            new FixedSystemClock(new DateTime(2026, 11, 16, 9, 0, 0)));
+            new FixedSystemClock(new DateTime(2026, 11, 16, 9, 0, 0)),
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<StaffManageViewModel>.Instance);
     }
 
     public void Dispose()

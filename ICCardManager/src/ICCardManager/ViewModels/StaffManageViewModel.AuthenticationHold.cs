@@ -3,9 +3,11 @@ using System;
 using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using ICCardManager.Infrastructure.Security;
 using ICCardManager.Infrastructure.Timing;
 using ICCardManager.Models;
 using ICCardManager.Services;
+using Microsoft.Extensions.Logging;
 
 namespace ICCardManager.ViewModels
 {
@@ -49,9 +51,19 @@ namespace ICCardManager.ViewModels
         /// </summary>
         internal const int HeldAuthenticationIdleTimeoutSeconds = 300;
 
-        /// <summary>認証を保持していないときの表示</summary>
+        /// <summary>認証を保持していないときの表示（登録済みの職員がいるとき）</summary>
+        /// <remarks>
+        /// 認証を求める契機は「保存」だけではない（職員証のタッチで始まる復元もある）ので、契機を限定しない書き方にする
+        /// （レビュー 2 回目で検出）。
+        /// </remarks>
         internal const string NoHeldAuthenticationText =
-            "職員証の認証: なし（登録・変更・復元を保存するときに、登録済みの職員の職員証で認証してください）";
+            "職員証の認証: なし（職員の登録・変更・復元で認証を求められたら、登録済みの職員の職員証をタッチしてください）";
+
+        /// <summary>
+        /// 認証を保持していないときの表示（登録済みの職員がいないとき。登録・復元の認証は免除される）
+        /// </summary>
+        internal const string NoHeldAuthenticationNoStaffText =
+            "職員証の認証: なし（登録済みの職員がいないため、職員の登録・復元では認証を求めません）";
 
         /// <summary>
         /// 認証を保持しているときの表示を組み立てる
@@ -101,8 +113,48 @@ namespace ICCardManager.ViewModels
         public bool IsAuthenticationHeld => HeldOperatorName != null;
 
         /// <summary>画面に常に表示する認証の状態</summary>
+        /// <remarks>
+        /// 保持していない間は、一覧（登録済みの職員）が空かどうかで文言を分ける。一覧の変化（<c>OnStaffListCollectionChanged</c>）でも
+        /// 変更を通知する。免除の判定そのものは保存の時点の DB（<c>RequiresOperatorAuthenticationAsync</c>）で行うので、これは案内の表示に限る。
+        /// </remarks>
         public string HeldAuthenticationText =>
-            HeldOperatorName is { } name ? BuildHeldAuthenticationText(name) : NoHeldAuthenticationText;
+            HeldOperatorName is { } name
+                ? BuildHeldAuthenticationText(name)
+                : StaffList.Count == 0 ? NoHeldAuthenticationNoStaffText : NoHeldAuthenticationText;
+
+        /// <summary>保持を解除した理由（アプリのログに残す）</summary>
+        internal enum HeldAuthenticationReleaseReason
+        {
+            /// <summary>「認証を解除」ボタン</summary>
+            ReleaseButton,
+
+            /// <summary>無操作の期限</summary>
+            IdleTimeout,
+
+            /// <summary>保持している職員が登録されていない（他のパソコンでの削除・差し替えを含む）</summary>
+            StaffNoLongerRegistered,
+
+            /// <summary>この画面で保持している職員を削除した</summary>
+            StaffDeleted,
+
+            /// <summary>この画面で保持している職員の職員証を差し替えた</summary>
+            StaffCardReplaced,
+
+            /// <summary>画面を閉じた</summary>
+            ScreenClosed,
+        }
+
+        /// <summary>解除の理由をログへ書く表記</summary>
+        internal static string DescribeReleaseReason(HeldAuthenticationReleaseReason reason) => reason switch
+        {
+            HeldAuthenticationReleaseReason.ReleaseButton => "「認証を解除」ボタン",
+            HeldAuthenticationReleaseReason.IdleTimeout => "無操作の期限",
+            HeldAuthenticationReleaseReason.StaffNoLongerRegistered => "保持している職員が登録されていない",
+            HeldAuthenticationReleaseReason.StaffDeleted => "保持している職員を削除した",
+            HeldAuthenticationReleaseReason.StaffCardReplaced => "保持している職員の職員証を差し替えた",
+            HeldAuthenticationReleaseReason.ScreenClosed => "画面を閉じた",
+            _ => reason.ToString(),
+        };
 
         /// <summary>
         /// 保持している認証を、次の 1 操作のための認証結果として取り出す（保持していない・使えないなら null）
@@ -146,7 +198,7 @@ namespace ICCardManager.ViewModels
             if (current == null)
             {
                 // 削除された・職員証が差し替えられた（他のパソコンの操作を含む）。認証を求め直す
-                ReleaseHeldAuthentication();
+                ReleaseHeldAuthenticationCore(HeldAuthenticationReleaseReason.StaffNoLongerRegistered);
                 return null;
             }
 
@@ -173,13 +225,18 @@ namespace ICCardManager.ViewModels
         /// セッションはこのメソッドの流れで開始し、<paramref name="write"/> はその内側で実行するため、書き込みの操作ログには
         /// 保持している職員が記録される。メソッドを抜けるとセッションは終わる。
         /// </remarks>
-        private async Task<bool> TryRunWithHeldAuthenticationAsync(Func<Task> write)
+        private async Task<bool> TryRunWithHeldAuthenticationAsync(string operation, Func<Task> write)
         {
             using var heldAuthResult = (await TakeHeldAuthenticationAsync())?.Enter();
             if (heldAuthResult == null)
             {
                 return false;
             }
+
+            // 保持した認証で記録した操作を、後から操作ログと突き合わせて見分けられるようにする（IT担当者ガイド §8.1）
+            _logger.LogInformation(
+                "職員管理画面で保持している職員証の認証で操作を行います（操作: {Operation}、職員 IDm: {StaffIdm}）",
+                operation, IdmMasker.Mask(heldAuthResult.Idm));
 
             try
             {
@@ -197,7 +254,9 @@ namespace ICCardManager.ViewModels
         /// <summary>
         /// 認証した職員を、画面が閉じるまで（無操作・「認証を解除」で破棄されるまで）保持する
         /// </summary>
-        private void HoldAuthentication(StaffAuthResult authResult)
+        /// <param name="authResult">認証した職員</param>
+        /// <param name="operation">認証した操作の名前（ログに残す）</param>
+        private void HoldAuthentication(StaffAuthResult authResult, string operation)
         {
             if (_isHeldAuthenticationClosed)
             {
@@ -209,6 +268,9 @@ namespace ICCardManager.ViewModels
             HeldOperatorName = authResult.StaffName;
             // 新しく保持するので、期限の判定を経ずに今から数える（前の保持の期限は関係ない）
             _heldAuthenticationLastActivityAt = _clock.Now;
+            _logger.LogInformation(
+                "職員管理画面で職員証の認証を保持しました（認証した操作: {Operation}、職員 IDm: {StaffIdm}）",
+                operation, IdmMasker.Mask(authResult.Idm));
 
             var timer = _heldAuthenticationTimer ??= CreateHeldAuthenticationTimer();
             timer.Stop();
@@ -221,6 +283,41 @@ namespace ICCardManager.ViewModels
         [RelayCommand(CanExecute = nameof(IsAuthenticationHeld))]
         public void ReleaseHeldAuthentication()
         {
+            ReleaseHeldAuthenticationCore(HeldAuthenticationReleaseReason.ReleaseButton);
+        }
+
+        /// <summary>
+        /// この画面で削除・職員証の差し替えをした職員が保持している職員なら、保持を破棄する（使えなくなった保持は破棄する）
+        /// </summary>
+        /// <param name="staffIdm">削除した職員・差し替える前の職員証の IDm</param>
+        /// <param name="reason">削除か差し替えか</param>
+        /// <remarks>
+        /// 削除・差し替えの認証は保持を置き換えないが、対象が保持している職員なら、成功した時点で保持は使えない（次の操作の
+        /// DB の確認で破棄されるが、それまで「認証中: 氏名」が残って画面と実際の動きが食い違う。レビュー 2 回目で検出）。
+        /// 対象が別の職員なら保持は変えない。
+        /// </remarks>
+        private void ReleaseHeldAuthenticationIfHeldStaff(string staffIdm, HeldAuthenticationReleaseReason reason)
+        {
+            if (_heldAuthentication is { } held && string.Equals(held.Idm, staffIdm, StringComparison.OrdinalIgnoreCase))
+            {
+                ReleaseHeldAuthenticationCore(reason);
+            }
+        }
+
+        /// <summary>
+        /// 保持を破棄する（保持していなければ何もしない）。解除の理由をアプリのログに残す
+        /// </summary>
+        private void ReleaseHeldAuthenticationCore(HeldAuthenticationReleaseReason reason)
+        {
+            var held = _heldAuthentication;
+            if (held == null)
+            {
+                return;
+            }
+
+            _logger.LogInformation(
+                "職員管理画面で保持していた職員証の認証を解除しました（理由: {Reason}、職員 IDm: {StaffIdm}）",
+                DescribeReleaseReason(reason), IdmMasker.Mask(held.Idm));
             _heldAuthentication = null;
             _heldAuthenticationTimer?.Stop();
             HeldOperatorName = null;
@@ -275,7 +372,7 @@ namespace ICCardManager.ViewModels
                 return false;
             }
 
-            ReleaseHeldAuthentication();
+            ReleaseHeldAuthenticationCore(HeldAuthenticationReleaseReason.IdleTimeout);
             return true;
         }
 
@@ -305,7 +402,7 @@ namespace ICCardManager.ViewModels
         private void CleanupHeldAuthentication()
         {
             _isHeldAuthenticationClosed = true;
-            ReleaseHeldAuthentication();
+            ReleaseHeldAuthenticationCore(HeldAuthenticationReleaseReason.ScreenClosed);
             if (_heldAuthenticationTimer != null)
             {
                 _heldAuthenticationTimer.Stop();

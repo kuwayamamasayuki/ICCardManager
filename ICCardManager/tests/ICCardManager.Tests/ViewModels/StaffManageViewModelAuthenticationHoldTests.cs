@@ -10,10 +10,13 @@ using ICCardManager.Data;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Dtos;
 using ICCardManager.Infrastructure.CardReader;
+using ICCardManager.Infrastructure.Security;
 using ICCardManager.Models;
 using ICCardManager.Services;
+using ICCardManager.Tests.Infrastructure;
 using ICCardManager.Tests.Infrastructure.Timing;
 using ICCardManager.ViewModels;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Xunit;
@@ -71,6 +74,7 @@ public class StaffManageViewModelAuthenticationHoldTests : IDisposable
         new(new CurrentOperatorContext(new FixedSystemClock(Start)));
     private readonly List<OperationLog> _operationLogs = new();
     private readonly TestTimerFactory _timerFactory = new();
+    private readonly RecordingLogger<StaffManageViewModel> _logger = new();
     private readonly DbContext _dbContext;
     private readonly StaffManageViewModel _viewModel;
 
@@ -89,7 +93,11 @@ public class StaffManageViewModelAuthenticationHoldTests : IDisposable
             .ReturnsAsync(1);
 
         _staffRepositoryMock.Setup(r => r.HasActiveStaffAsync()).ReturnsAsync(true);
-        _staffRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<Staff>());
+        // 既定: 一覧には保持する職員（認証 太郎）が載っている（登録済みの職員がいる）
+        _staffRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<Staff>
+        {
+            new() { StaffIdm = HolderIdm, Name = HolderName, Number = "S-000" }
+        });
         _staffRepositoryMock.Setup(r => r.InsertAsync(It.IsAny<Staff>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(true);
         _staffRepositoryMock.Setup(r => r.UpdateAsync(It.IsAny<Staff>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(true);
         _staffRepositoryMock.Setup(r => r.RestoreAsync(It.IsAny<string>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(true);
@@ -116,7 +124,11 @@ public class StaffManageViewModelAuthenticationHoldTests : IDisposable
             new WeakReferenceMessenger(),
             new RecordingDispatcherService(),
             _timerFactory,
-            _clock);
+            _clock,
+            _logger);
+
+        // 画面を開いたときの読み込み（一覧が空かどうかで「なし」の文言が変わる）
+        _viewModel.InitializeAsync().GetAwaiter().GetResult();
     }
 
     public void Dispose()
@@ -456,6 +468,187 @@ public class StaffManageViewModelAuthenticationHoldTests : IDisposable
         _viewModel.HeldAuthenticationText.Should().Be(StaffManageViewModel.BuildHeldAuthenticationText(HolderName));
         _viewModel.HeldAuthenticationText.Should().StartWith($"認証中: {HolderName}");
         _viewModel.HeldAuthenticationText.Should().Contain("5分");
+    }
+
+    #endregion
+
+    #region この画面での削除・差し替え（レビュー 2 回目）
+
+    private void SelectStaff(string idm, string name)
+    {
+        _staffRepositoryMock.Setup(r => r.GetByIdmAsync(idm, false)).ReturnsAsync(new Staff { StaffIdm = idm, Name = name });
+        _viewModel.SelectedStaff = new StaffDto { StaffIdm = idm, Name = name };
+    }
+
+    [Fact]
+    public async Task 保持している職員をこの画面で削除したら保持を破棄すること()
+    {
+        await HoldByFirstRegistrationAsync();
+        ArrangeAuthenticationSucceeds("職員の削除", OtherAuthIdm, OtherAuthName);
+        SelectStaff(HolderIdm, HolderName);
+
+        await _viewModel.DeleteAsync();
+
+        _staffRepositoryMock.Verify(r => r.DeleteAsync(HolderIdm, It.IsAny<SQLiteTransaction>()), Times.Once);
+        _viewModel.IsAuthenticationHeld.Should().BeFalse("削除した職員の保持は使えない。表示を残さない");
+        _viewModel.HeldAuthenticationText.Should().Be(StaffManageViewModel.NoHeldAuthenticationText);
+        _logger.Entries.Should().Contain(e => e.Level == LogLevel.Information
+            && e.Message.Contains("解除しました") && e.Message.Contains("保持している職員を削除した"));
+    }
+
+    [Fact]
+    public async Task 保持している職員の削除が競合で書かれなければ保持を変えないこと()
+    {
+        await HoldByFirstRegistrationAsync();
+        ArrangeAuthenticationSucceeds("職員の削除", OtherAuthIdm, OtherAuthName);
+        SelectStaff(HolderIdm, HolderName);
+        _staffRepositoryMock.Setup(r => r.DeleteAsync(HolderIdm, It.IsAny<SQLiteTransaction>())).ReturnsAsync(false);
+
+        await _viewModel.DeleteAsync();
+
+        _viewModel.HeldOperatorName.Should().Be(HolderName, "削除が成功したときだけ破棄する（使えるかは次の操作の DB の確認が決める）");
+    }
+
+    private async Task ReplaceStaffCardAsync(string targetIdm, string targetName)
+    {
+        const string newIdm = "FFFF000000000999";
+        _staffAuthServiceMock
+            .Setup(a => a.RequestAuthenticationAsync("職員証の差し替え"))
+            .ReturnsAsync(() => StaffAuthService.CreateAuthenticatedResult(_operatorContext, OtherAuthIdm, OtherAuthName));
+        _staffRepositoryMock.Setup(r => r.CheckStaffIdmReplacementAsync(targetIdm, newIdm))
+            .ReturnsAsync(StaffCardReplacementResult.Available());
+        _staffRepositoryMock.Setup(r => r.ReplaceStaffIdmAsync(targetIdm, newIdm, It.IsAny<SQLiteTransaction>()))
+            .ReturnsAsync(StaffCardReplacementResult.Replaced(
+                new Staff { StaffIdm = targetIdm, Name = targetName },
+                new Staff { StaffIdm = newIdm, Name = targetName },
+                ledgerRows: 0, cardRows: 0, mergeHistoryRows: 0));
+        SelectStaff(targetIdm, targetName);
+        _viewModel.StartEdit();
+
+        var task = _viewModel.ReplaceStaffCardAsync();
+        _viewModel.IsWaitingForReplacementCard.Should().BeTrue("認証の後は新しい職員証のタッチを待つ");
+        _viewModel.HandleReplacementCardRead(newIdm);
+        await task;
+        _viewModel.StatusMessage.Should().Be(StaffManageViewModel.BuildReplacementCompletedMessage(targetName));
+    }
+
+    [Fact]
+    public async Task 保持している職員の職員証をこの画面で差し替えたら保持を破棄すること()
+    {
+        await HoldByFirstRegistrationAsync();
+
+        await ReplaceStaffCardAsync(HolderIdm, HolderName);
+
+        _viewModel.IsAuthenticationHeld.Should().BeFalse("古い職員証の IDm の保持は使えない");
+        _logger.Entries.Should().Contain(e => e.Message.Contains("保持している職員の職員証を差し替えた"));
+    }
+
+    [Fact]
+    public async Task 別の職員の職員証を差し替えても保持を変えないこと()
+    {
+        await HoldByFirstRegistrationAsync();
+
+        await ReplaceStaffCardAsync(EditTargetIdm, "既存 一郎");
+
+        _viewModel.HeldOperatorName.Should().Be(HolderName, "差し替えの認証でも、別の職員の差し替えでも保持は変えない");
+    }
+
+    #endregion
+
+    #region 保持していないときの表示（レビュー 2 回目）
+
+    [Fact]
+    public async Task 登録済みの職員がいなければ認証を求めない旨を表示し_職員がいれば認証の案内に切り替わること()
+    {
+        _staffRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<Staff>());
+        await _viewModel.LoadStaffAsync();
+        _viewModel.HeldAuthenticationText.Should().Be(StaffManageViewModel.NoHeldAuthenticationNoStaffText);
+
+        var changes = new List<string>();
+        _viewModel.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(StaffManageViewModel.HeldAuthenticationText))
+            {
+                changes.Add(_viewModel.HeldAuthenticationText);
+            }
+        };
+        _staffRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<Staff>
+        {
+            new() { StaffIdm = FirstIdm, Name = "最初 一人" }
+        });
+        await _viewModel.LoadStaffAsync();
+
+        _viewModel.HeldAuthenticationText.Should().Be(StaffManageViewModel.NoHeldAuthenticationText);
+        changes.Should().Contain(StaffManageViewModel.NoHeldAuthenticationText, "一覧の人数の変化で表示を通知する");
+    }
+
+    [Fact]
+    public void 保持していないときの文言は認証の契機を保存に限らないこと()
+    {
+        StaffManageViewModel.NoHeldAuthenticationText.Should().NotContain("保存");
+        StaffManageViewModel.NoHeldAuthenticationText.Should().Contain("登録済みの職員の職員証");
+        StaffManageViewModel.NoHeldAuthenticationNoStaffText.Should().Contain("登録済みの職員がいない");
+    }
+
+    #endregion
+
+    #region アプリのログ（レビュー 2 回目）
+
+    [Fact]
+    public async Task 保持の開始と保持した認証での操作をIDmをマスクしてログに残すこと()
+    {
+        await HoldByFirstRegistrationAsync();
+        await RegisterAsync(SecondIdm, "新人 二号");
+
+        var masked = IdmMasker.Mask(HolderIdm)!;
+        _logger.Entries.Should().Contain(e => e.Level == LogLevel.Information
+            && e.Message.Contains("保持しました") && e.Message.Contains("職員の登録") && e.Message.Contains(masked));
+        _logger.Entries.Should().ContainSingle(e => e.Level == LogLevel.Information
+            && e.Message.Contains("保持している職員証の認証で操作を行います") && e.Message.Contains("職員の登録")
+            && e.Message.Contains(masked), "2 回目の登録だけが保持した認証での操作");
+        _logger.Entries.Should().NotContain(e => e.Message.Contains(HolderIdm), "IDm を生でログへ出さない（#1852）");
+    }
+
+    [Theory]
+    [InlineData("button", "「認証を解除」ボタン")]
+    [InlineData("idle", "無操作の期限")]
+    [InlineData("invalid", "保持している職員が登録されていない")]
+    [InlineData("closed", "画面を閉じた")]
+    public async Task 保持の解除を理由とともにログに残すこと(string trigger, string reason)
+    {
+        await HoldByFirstRegistrationAsync();
+
+        switch (trigger)
+        {
+            case "button":
+                _viewModel.ReleaseHeldAuthenticationCommand.Execute(null);
+                break;
+            case "idle":
+                _clock.Now += IdleTimeout;
+                HoldTimer.SimulateTick();
+                break;
+            case "invalid":
+                ArrangeHolderNoLongerRegistered();
+                ArrangeAuthenticationCancelled("職員の登録");
+                await EnterNewStaffFormAsync(SecondIdm, "新人 二号");
+                await _viewModel.SaveAsync();
+                break;
+            case "closed":
+                _viewModel.Cleanup();
+                break;
+        }
+
+        _viewModel.IsAuthenticationHeld.Should().BeFalse();
+        _logger.Entries.Should().ContainSingle(e => e.Level == LogLevel.Information && e.Message.Contains("解除しました"))
+            .Which.Message.Should().Contain(reason).And.Contain(IdmMasker.Mask(HolderIdm)!);
+    }
+
+    [Fact]
+    public void 保持していないときの解除はログに残さないこと()
+    {
+        _viewModel.Cleanup();
+
+        _logger.Entries.Should().NotContain(e => e.Message.Contains("解除しました"));
     }
 
     #endregion

@@ -18,6 +18,7 @@ using ICCardManager.Infrastructure.CardReader;
 using ICCardManager.Infrastructure.Timing;
 using ICCardManager.Models;
 using ICCardManager.Services;
+using Microsoft.Extensions.Logging;
 
 namespace ICCardManager.ViewModels
 {
@@ -67,6 +68,7 @@ namespace ICCardManager.ViewModels
 
         [ObservableProperty]
         [NotifyPropertyChangedFor(nameof(IsSingleStaffNoticeVisible))]
+        [NotifyPropertyChangedFor(nameof(HeldAuthenticationText))]
         private ObservableCollection<StaffDto> _staffList = new();
 
         /// <summary>
@@ -194,6 +196,9 @@ namespace ICCardManager.ViewModels
         /// <summary>認証の保持の無操作の時間を測る時計（Issue #2494）</summary>
         private readonly ISystemClock _clock;
 
+        /// <summary>認証の保持の開始・解除・保持した認証での操作を残すログ（Issue #2494）</summary>
+        private readonly ILogger<StaffManageViewModel> _logger;
+
         /// <summary>職員証の差し替えのタッチ待ちの残り時間を刻むタイマー（初めて待つときに作る）</summary>
         private ITimer? _replacementCardTimer;
 
@@ -215,8 +220,11 @@ namespace ICCardManager.ViewModels
             IMessenger messenger,
             IDispatcherService dispatcherService,
             ITimerFactory timerFactory,
-            ISystemClock clock)
+            ISystemClock clock,
+            ILogger<StaffManageViewModel> logger)
         {
+            // 省略可能にすると DI の配線漏れが「保持した認証で記録した操作を見分ける痕跡が残らない」形で潜在化する（#1820）
+            _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             // 省略可能にすると DI の配線漏れが「無操作でも認証の保持が解除されない」形で潜在化する（#1820）
             _clock = clock ?? throw new ArgumentNullException(nameof(clock));
             // 省略可能にすると DI の配線漏れが「差し替えのタッチ待ちが時間切れにならない」形で潜在化する（#1820）
@@ -245,6 +253,8 @@ namespace ICCardManager.ViewModels
         private void OnStaffListCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
         {
             OnPropertyChanged(nameof(IsSingleStaffNoticeVisible));
+            // Issue #2494: 保持していない間の表示は、登録済みの職員がいるかで変わる
+            OnPropertyChanged(nameof(HeldAuthenticationText));
         }
 
         /// <summary>
@@ -849,7 +859,7 @@ namespace ICCardManager.ViewModels
             }
 
             // Issue #2494: この画面で認証を保持していれば、認証ダイアログを出さずにその職員の操作として行う
-            if (await TryRunWithHeldAuthenticationAsync(write))
+            if (await TryRunWithHeldAuthenticationAsync("職員の登録", write))
             {
                 return true;
             }
@@ -867,7 +877,7 @@ namespace ICCardManager.ViewModels
             }
 
             // Issue #2494: 認証した職員を、画面が閉じるまで（無操作・「認証を解除」で破棄されるまで）保持する
-            HoldAuthentication(authResult);
+            HoldAuthentication(authResult, "職員の登録");
             await write();
             return true;
         }
@@ -885,7 +895,7 @@ namespace ICCardManager.ViewModels
             }
 
             // Issue #2494: この画面で認証を保持していれば、認証ダイアログを出さずにその職員の操作として行う
-            if (await TryRunWithHeldAuthenticationAsync(write))
+            if (await TryRunWithHeldAuthenticationAsync("職員情報の変更", write))
             {
                 return true;
             }
@@ -903,7 +913,7 @@ namespace ICCardManager.ViewModels
             }
 
             // Issue #2494: 認証した職員を、画面が閉じるまで（無操作・「認証を解除」で破棄されるまで）保持する
-            HoldAuthentication(authResult);
+            HoldAuthentication(authResult, "職員情報の変更");
             await write();
             return true;
         }
@@ -925,7 +935,7 @@ namespace ICCardManager.ViewModels
             }
 
             // Issue #2494: この画面で認証を保持していれば、認証ダイアログを出さずにその職員の操作として行う
-            if (await TryRunWithHeldAuthenticationAsync(write))
+            if (await TryRunWithHeldAuthenticationAsync("職員の復元", write))
             {
                 return true;
             }
@@ -943,7 +953,7 @@ namespace ICCardManager.ViewModels
             }
 
             // Issue #2494: 認証した職員を、画面が閉じるまで（無操作・「認証を解除」で破棄されるまで）保持する
-            HoldAuthentication(authResult);
+            HoldAuthentication(authResult, "職員の復元");
             await write();
             return true;
         }
@@ -1093,6 +1103,9 @@ namespace ICCardManager.ViewModels
                     var success = await _staffManagementService.DeleteAsync(staff);
                     if (success)
                     {
+                        // Issue #2494: 保持している職員を削除したら、使えなくなった保持を破棄する（別の職員なら変えない）
+                        ReleaseHeldAuthenticationIfHeldStaff(staff.StaffIdm, HeldAuthenticationReleaseReason.StaffDeleted);
+
                         await LoadStaffAsync();
                         CancelEdit();
                         // Issue #1759: CancelEdit() は StatusMessage / IsStatusError をクリアするため、
@@ -1642,6 +1655,10 @@ namespace ICCardManager.ViewModels
                 if (result.IsOk)
                 {
                     committed.Value = true;
+
+                    // Issue #2494: 保持している職員の職員証を差し替えたら、使えなくなった保持を破棄する（別の職員なら変えない）
+                    ReleaseHeldAuthenticationIfHeldStaff(
+                        result.Before?.StaffIdm ?? targetIdm, HeldAuthenticationReleaseReason.StaffCardReplaced);
 
                     // 同じ PC のメイン画面が持つ古い IDm（30 秒ルールの前回操作者）を新しい IDm へ置き換えさせる
                     _messenger.Send(new StaffCardReplacedMessage(
