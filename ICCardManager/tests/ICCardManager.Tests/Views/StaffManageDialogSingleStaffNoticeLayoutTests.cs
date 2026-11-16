@@ -92,7 +92,7 @@ public class StaffManageDialogSingleStaffNoticeLayoutTests
         rowsStart.Should().BeGreaterThanOrEqualTo(0);
         var rowCount = System.Text.RegularExpressions.Regex.Matches(
             left.Body.Substring(rowsStart, rowsEnd - rowsStart), "<RowDefinition\\b").Count;
-        rowCount.Should().Be(4, "見出し・注意・一覧・ボタン行の 4 行");
+        rowCount.Should().Be(5, "見出し・職員証の認証の保持の表示（Issue #2494）・注意・一覧・ボタン行の 5 行");
 
         string? RowOf(System.Func<XamlElementInspection.XamlElementSpan, bool> predicate)
         {
@@ -101,14 +101,16 @@ public class StaffManageDialogSingleStaffNoticeLayoutTests
         }
 
         var header = RowOf(t => t.StartTag.StartsWith("<StackPanel", System.StringComparison.Ordinal)) ?? "0";
+        var held = RowOf(t => XamlElementInspection.GetAttribute(t.StartTag, "x:Name") == "HeldAuthenticationPanel");
         var notice = RowOf(t => XamlElementInspection.GetAttribute(t.StartTag, "x:Name") == "SingleStaffNotice");
         var list = RowOf(t => XamlElementInspection.GetAttribute(t.StartTag, "x:Name") == "StaffDataGrid");
         var buttons = RowOf(t => t.StartTag.StartsWith("<DockPanel", System.StringComparison.Ordinal));
 
-        notice.Should().Be("1", "注意は見出しと一覧の間の行に置く");
-        list.Should().Be("2");
-        buttons.Should().Be("3");
-        new[] { header, notice, list, buttons }.Should().OnlyHaveUniqueItems(
+        held.Should().Be("1", "職員証の認証の保持の表示は見出しの直下に置く（Issue #2494）");
+        notice.Should().Be("2", "注意は見出しと一覧の間の行に置く");
+        list.Should().Be("3");
+        buttons.Should().Be("4");
+        new[] { header, held, notice, list, buttons }.Should().OnlyHaveUniqueItems(
             "同じ行に置くと注意が一覧やボタンに重なって読めなくなる");
     }
 }

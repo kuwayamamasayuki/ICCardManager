@@ -820,6 +820,11 @@ namespace ICCardManager.ViewModels
         /// 登録・更新・復元で 3 つに分けているのは、操作名を <c>RequestAuthenticationAsync</c> へ
         /// 文字列リテラルで渡すため（静的検査がリテラルを数える。Issue #2255）。
         /// </para>
+        /// <para>
+        /// Issue #2494: この画面で一度認証したら、その職員を画面が閉じるまで保持し、2 回目以降は認証ダイアログを出さずに
+        /// 保持している職員の操作として行う（<see cref="TryRunWithHeldAuthenticationAsync"/>。セッションは操作ごとに開始し、
+        /// 操作が終わったら閉じる）。削除と職員証の差し替えはこの保持を使わない。
+        /// </para>
         /// </remarks>
         private async Task<bool> RunRegisterWithAuthenticationAsync(bool requiresAuthentication, Func<Task> write)
         {
@@ -831,12 +836,20 @@ namespace ICCardManager.ViewModels
                 return true;
             }
 
+            // Issue #2494: この画面で認証を保持していれば、認証ダイアログを出さずにその職員の操作として行う
+            if (await TryRunWithHeldAuthenticationAsync(write))
+            {
+                return true;
+            }
+
             using var authResult = (await _staffAuthService.RequestAuthenticationAsync("職員の登録"))?.Enter();
             if (authResult == null)
             {
                 return false;
             }
 
+            // Issue #2494: 認証した職員を、画面が閉じるまで（無操作・「認証を解除」で破棄されるまで）保持する
+            HoldAuthentication(authResult);
             await write();
             return true;
         }
@@ -853,12 +866,20 @@ namespace ICCardManager.ViewModels
                 return true;
             }
 
+            // Issue #2494: この画面で認証を保持していれば、認証ダイアログを出さずにその職員の操作として行う
+            if (await TryRunWithHeldAuthenticationAsync(write))
+            {
+                return true;
+            }
+
             using var authResult = (await _staffAuthService.RequestAuthenticationAsync("職員情報の変更"))?.Enter();
             if (authResult == null)
             {
                 return false;
             }
 
+            // Issue #2494: 認証した職員を、画面が閉じるまで（無操作・「認証を解除」で破棄されるまで）保持する
+            HoldAuthentication(authResult);
             await write();
             return true;
         }
@@ -879,12 +900,20 @@ namespace ICCardManager.ViewModels
                 return true;
             }
 
+            // Issue #2494: この画面で認証を保持していれば、認証ダイアログを出さずにその職員の操作として行う
+            if (await TryRunWithHeldAuthenticationAsync(write))
+            {
+                return true;
+            }
+
             using var authResult = (await _staffAuthService.RequestAuthenticationAsync("職員の復元"))?.Enter();
             if (authResult == null)
             {
                 return false;
             }
 
+            // Issue #2494: 認証した職員を、画面が閉じるまで（無操作・「認証を解除」で破棄されるまで）保持する
+            HoldAuthentication(authResult);
             await write();
             return true;
         }
@@ -1794,6 +1823,9 @@ namespace ICCardManager.ViewModels
                 _replacementCardTimer.Stop();
                 _replacementCardTimer.Tick -= OnReplacementCardTimerTick;
             }
+
+            // Issue #2494: 画面を閉じたら（「完了」・×・Esc・初期化の失敗のどれでも）保持している認証を破棄する
+            CleanupHeldAuthentication();
 
             // ダイアログ終了時に抑制を解除（Issue #852）
             _messenger.Send(new CardReadingSuppressedMessage(false, CardReadingSource.StaffRegistration));

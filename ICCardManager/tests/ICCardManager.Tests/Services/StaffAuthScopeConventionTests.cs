@@ -41,6 +41,22 @@ public class StaffAuthScopeConventionTests
     /// <summary>操作者セッションの開始。</summary>
     private static readonly Regex BeginSessionCallPattern = new Regex(@"\.BeginSession\(");
 
+    /// <summary>認証結果の <c>Enter()</c> の呼び出し（宣言 <c>public StaffAuthResult Enter()</c> はドットを伴わないので一致しない）。</summary>
+    private static readonly Regex EnterCallPattern = new Regex(@"\.\s*Enter\(\s*\)");
+
+    /// <summary>
+    /// Issue #2494: 保持している認証から作り直した結果を、その場で <c>Enter()</c> してから <c>using</c> で受ける呼び出し
+    /// （<c>using var r = (await TakeHeldAuthenticationAsync())?.Enter();</c>）。
+    /// </summary>
+    private static readonly Regex ScopedHeldAuthCallPattern = new Regex(
+        @"using\s*(?:\(\s*)?var\s+\w+\s*=\s*\(\s*await\s+[\w.]+\(\s*\)\s*\)\s*\?\.\s*Enter\(\s*\)");
+
+    /// <summary>保持している認証から次の 1 操作の結果を作る呼び出し（Issue #2494）。</summary>
+    private static readonly Regex ReissueCallPattern = new Regex(@"\.ReissueForNextOperation\(");
+
+    /// <summary>保持している認証から結果を作ってよい唯一のファイル（職員管理画面の認証の保持。Issue #2494）。</summary>
+    private static readonly string ReissueOwnerRelativePath = Path.Combine("ViewModels", "StaffManageViewModel.AuthenticationHold.cs");
+
     /// <summary>操作者セッションを開始してよい唯一のファイル（認証結果の <c>Enter()</c>）。</summary>
     private const string SessionOwnerFileName = "StaffAuthResult.cs";
 
@@ -76,6 +92,73 @@ public class StaffAuthScopeConventionTests
             "操作者セッションは認証結果の Enter() だけが開始し、その終了を認証結果の破棄へ結び付けている（Issue #2260）。" +
             "ほかの場所から開始すると、終える責任者のいないセッションが残る。\n" +
             string.Join("\n", violations));
+    }
+
+    /// <summary>
+    /// Issue #2494: 認証結果の <c>Enter()</c> は、どこから得た結果でもその場で <c>using</c> で受けること。
+    /// </summary>
+    /// <remarks>
+    /// 職員管理画面は認証した職員を画面が閉じるまで保持し、次の操作の結果を作り直して <c>Enter()</c> する。
+    /// 認証の呼び出し（<c>RequestAuthenticationAsync</c>）を経ない <c>Enter()</c> は上の検査に数えられないため、
+    /// <c>Enter()</c> の呼び出しそのものを数えて、すべてが決まった形（認証の呼び出し・保持の取り出し）であることを表明する。
+    /// using で受けないと、操作と操作の間に操作者セッションが残り、この画面の外の認証の無い操作が拾う（Issue #2260）。
+    /// </remarks>
+    [Fact]
+    public void 認証結果のEnterはすべてその場でusingで受けること()
+    {
+        var violations = EnumerateProductionSources()
+            .Select(f => (File: f, Code: ReadCode(f)))
+            .Select(x => (x.File,
+                Enters: EnterCallPattern.Matches(x.Code).Count,
+                Scoped: ScopedAuthCallPattern.Matches(x.Code).Count + ScopedHeldAuthCallPattern.Matches(x.Code).Count))
+            .Where(x => x.Enters != x.Scoped)
+            .Select(x => $"  - {RelativePath(x.File)}: Enter() {x.Enters} 件のうち決まった形のもの {x.Scoped} 件")
+            .ToList();
+
+        violations.Should().BeEmpty(
+            "認証結果の Enter() は、その場で using で受けること（操作が終わったら操作者セッションを閉じる。Issue #2260 / #2494）。\n" +
+            string.Join("\n", violations));
+    }
+
+    /// <summary>
+    /// Issue #2494: 保持している認証から結果を作るのは、職員管理画面の認証の保持の 1 ファイルだけであること。
+    /// </summary>
+    [Fact]
+    public void 保持している認証から結果を作るのは職員管理画面の保持だけであること()
+    {
+        var root = TestPaths.GetProductionSourceRoot();
+        var owner = Path.GetFullPath(Path.Combine(root, ReissueOwnerRelativePath));
+        var callers = EnumerateProductionSources()
+            .Where(f => ReissueCallPattern.IsMatch(ReadCode(f)))
+            .Select(Path.GetFullPath)
+            .ToList();
+
+        callers.Should().Equal(new[] { owner },
+            "認証した職員の保持は、削除・差し替えを除く職員管理画面の登録・変更・復元に限るとユーザーが決めた（Issue #2494）。" +
+            "ほかの画面で保持すると、認証した職員と別の職員の操作の取り違え（Issue #2260）が画面の外へ広がる");
+
+        var ownerCode = ReadCode(owner);
+        ScopedHeldAuthCallPattern.Matches(ownerCode).Count.Should().Be(1,
+            "保持の取り出しが決まった形として拾えていること（拾えなければ上の Enter() の検査が空振りする）");
+        EnterCallPattern.Matches(ownerCode).Count.Should().Be(1);
+    }
+
+    /// <summary>
+    /// Issue #2494: Enter() の検査を既知のサンプル入力で固定する。
+    /// </summary>
+    [Fact]
+    public void Enterの検査はusingで受けない形を違反として数えること()
+    {
+        const string sample =
+            "using var a = (await TakeHeldAuthenticationAsync())?.Enter();\n" +
+            "using var b = (await _staffAuthService.RequestAuthenticationAsync(\"職員の登録\"))?.Enter();\n" +
+            "var c = (await TakeHeldAuthenticationAsync())?.Enter();\n" +
+            "using var d = _held.ReissueForNextOperation(name).Enter();\n" +
+            "public StaffAuthResult Enter()\n";
+
+        EnterCallPattern.Matches(sample).Count.Should().Be(4, "宣言は呼び出しとして数えない");
+        (ScopedAuthCallPattern.Matches(sample).Count + ScopedHeldAuthCallPattern.Matches(sample).Count).Should().Be(2,
+            "using で受けない形・await の結果でない形は決まった形として数えない");
     }
 
     /// <summary>

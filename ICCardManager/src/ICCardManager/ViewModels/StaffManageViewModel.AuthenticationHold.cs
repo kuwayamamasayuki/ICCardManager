@@ -1,0 +1,244 @@
+#nullable enable
+using System;
+using System.Threading.Tasks;
+using CommunityToolkit.Mvvm.ComponentModel;
+using CommunityToolkit.Mvvm.Input;
+using ICCardManager.Infrastructure.Timing;
+using ICCardManager.Models;
+using ICCardManager.Services;
+
+namespace ICCardManager.ViewModels
+{
+    /// <summary>
+    /// 職員管理画面の職員証の認証の保持（Issue #2494）
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 職員の登録・変更・復元は、この画面で最初に認証が要ったときだけ職員証の認証を求め、認証した職員を画面が閉じるまで
+    /// 保持する。2 回目以降は認証ダイアログを出さず、保持している職員の操作として操作ログへ記録する。
+    /// </para>
+    /// <para>
+    /// <b>保持するのは「誰か」だけで、操作者セッションではない</b>。セッションは操作ごとに
+    /// <see cref="StaffAuthResult.ReissueForNextOperation"/> で作り直した結果をその場で <c>Enter()</c> して開始し、
+    /// 操作が終わったら破棄する。操作と操作の間にセッションを残すと、この画面の外の認証の無い操作が拾う（Issue #2260）。
+    /// </para>
+    /// <para>
+    /// 画面単位で保持すると、認証した職員が席を離れた後の別の職員の操作が、認証した職員の名前で記録され得る（#2260 と
+    /// 同じ取り違えを、この画面を開いている間に限って許す）。そのため次の 4 つで保持を短くする。
+    /// </para>
+    /// <list type="number">
+    /// <item><description>画面に「認証中: 氏名」を常に表示する（<see cref="HeldAuthenticationText"/>）</description></item>
+    /// <item><description>「認証を解除」で破棄できる（<see cref="ReleaseHeldAuthenticationCommand"/>）</description></item>
+    /// <item><description>
+    /// 無操作が <see cref="HeldAuthenticationIdleTimeoutSeconds"/> 秒続いたら破棄する。無操作とは、この画面へのキー入力・
+    /// マウスのボタン・ホイールの操作（View が <see cref="NotifyUserActivity"/> を呼ぶ）と、保持した認証を使った操作が
+    /// 無いこと
+    /// </description></item>
+    /// <item><description>画面を閉じたら破棄する（<see cref="Cleanup"/>）</description></item>
+    /// </list>
+    /// <para>
+    /// 保持を使う前に、保持している職員が削除されていない同じ IDm の職員として登録されているかを DB で確かめ、
+    /// 登録されていなければ（他のパソコンでの削除・職員証の差し替えを含む）破棄して認証を求め直す。
+    /// 削除と職員証の差し替えはこの保持を使わず、変えもしない（確認の後に毎回認証を求める）。
+    /// </para>
+    /// </remarks>
+    public partial class StaffManageViewModel
+    {
+        /// <summary>
+        /// 無操作のまま保持した認証を破棄するまでの秒数（Issue #2494。5 分。設定にはしない）
+        /// </summary>
+        internal const int HeldAuthenticationIdleTimeoutSeconds = 300;
+
+        /// <summary>認証を保持していないときの表示</summary>
+        internal const string NoHeldAuthenticationText =
+            "職員証の認証: なし（登録・変更・復元を保存するときに、登録済みの職員の職員証で認証してください）";
+
+        /// <summary>
+        /// 認証を保持しているときの表示を組み立てる
+        /// </summary>
+        /// <param name="staffName">保持している職員の氏名</param>
+        internal static string BuildHeldAuthenticationText(string staffName)
+            => $"認証中: {staffName}（この画面での登録・変更・復元は、{staffName} の操作として記録します。" +
+               $"操作が無いまま{HeldAuthenticationIdleTimeoutSeconds / 60}分たつか、画面を閉じると解除します）";
+
+        /// <summary>
+        /// 保持している認証（最初の操作で受け取った結果。<c>Enter()</c> はせず、次の操作の結果を作るためだけに使う）
+        /// </summary>
+        private StaffAuthResult? _heldAuthentication;
+
+        /// <summary>無操作のまま破棄するまでの残り秒数を刻むタイマー（初めて保持するときに作る）</summary>
+        private ITimer? _heldAuthenticationTimer;
+
+        /// <summary>無操作のまま破棄するまでの残り秒数</summary>
+        private int _heldAuthenticationRemainingSeconds;
+
+        /// <summary>
+        /// 保持している職員の氏名（保持していなければ null）
+        /// </summary>
+        [ObservableProperty]
+        [NotifyPropertyChangedFor(nameof(IsAuthenticationHeld))]
+        [NotifyPropertyChangedFor(nameof(HeldAuthenticationText))]
+        [NotifyCanExecuteChangedFor(nameof(ReleaseHeldAuthenticationCommand))]
+        private string? _heldOperatorName;
+
+        /// <summary>職員証の認証を保持しているか</summary>
+        public bool IsAuthenticationHeld => HeldOperatorName != null;
+
+        /// <summary>画面に常に表示する認証の状態</summary>
+        public string HeldAuthenticationText =>
+            HeldOperatorName is { } name ? BuildHeldAuthenticationText(name) : NoHeldAuthenticationText;
+
+        /// <summary>
+        /// 保持している認証を、次の 1 操作のための認証結果として取り出す（保持していない・使えないなら null）
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// 返した結果は呼び出し側がその場で <c>Enter()</c> して <c>using</c> で受ける（静的検査）。
+        /// </para>
+        /// <para>
+        /// 保持している職員が削除されていない同じ IDm の職員として登録されているかを確かめ（キャッシュを通さない読み取り）、
+        /// 登録されていなければ保持を破棄して null を返す（呼び出し側は認証を求め直す）。確認の間は処理中にする
+        /// （処理中の外で DB を待つと、その間に取り消したフォームの内容が書き込まれ得る。Issue #2263）。
+        /// </para>
+        /// </remarks>
+        private async Task<StaffAuthResult?> TakeHeldAuthenticationAsync()
+        {
+            var held = _heldAuthentication;
+            if (held == null)
+            {
+                return null;
+            }
+
+            Staff? current;
+            using (BeginBusy("確認中..."))
+            {
+                current = await _staffRepository.GetByIdmAsync(held.Idm);
+            }
+
+            // 確かめている間に「認証を解除」・無操作で破棄された、または別の認証に置き換わったなら使わない
+            if (!ReferenceEquals(_heldAuthentication, held))
+            {
+                return null;
+            }
+
+            if (current == null)
+            {
+                // 削除された・職員証が差し替えられた（他のパソコンの操作を含む）。認証を求め直す
+                ReleaseHeldAuthentication();
+                return null;
+            }
+
+            var name = !string.IsNullOrWhiteSpace(current.Name) ? current.Name : held.StaffName;
+            HeldOperatorName = name;
+            ResetHeldAuthenticationIdleCountdown();
+            return held.ReissueForNextOperation(name);
+        }
+
+        /// <summary>
+        /// 保持している認証があれば、認証ダイアログを出さずにその職員の操作として <paramref name="write"/> を行う
+        /// </summary>
+        /// <returns>保持している認証で行ったら true。保持していない・使えないなら false（何もしていない）</returns>
+        /// <remarks>
+        /// セッションはこのメソッドの流れで開始し、<paramref name="write"/> はその内側で実行するため、書き込みの操作ログには
+        /// 保持している職員が記録される。メソッドを抜けるとセッションは終わる。
+        /// </remarks>
+        private async Task<bool> TryRunWithHeldAuthenticationAsync(Func<Task> write)
+        {
+            using var heldAuthResult = (await TakeHeldAuthenticationAsync())?.Enter();
+            if (heldAuthResult == null)
+            {
+                return false;
+            }
+
+            try
+            {
+                await write();
+            }
+            finally
+            {
+                // 操作の終わりも「操作があった」とみなす（書き込みに時間がかかっても、その直後に破棄しない）
+                ResetHeldAuthenticationIdleCountdown();
+            }
+
+            return true;
+        }
+
+        /// <summary>
+        /// 認証した職員を、画面が閉じるまで（無操作・「認証を解除」で破棄されるまで）保持する
+        /// </summary>
+        private void HoldAuthentication(StaffAuthResult authResult)
+        {
+            _heldAuthentication = authResult;
+            HeldOperatorName = authResult.StaffName;
+            ResetHeldAuthenticationIdleCountdown();
+
+            var timer = _heldAuthenticationTimer ??= CreateHeldAuthenticationTimer();
+            timer.Stop();
+            timer.Start();
+        }
+
+        /// <summary>
+        /// 保持している職員証の認証を破棄する（「認証を解除」。次の登録・変更・復元では認証を求める）
+        /// </summary>
+        [RelayCommand(CanExecute = nameof(IsAuthenticationHeld))]
+        public void ReleaseHeldAuthentication()
+        {
+            _heldAuthentication = null;
+            _heldAuthenticationTimer?.Stop();
+            _heldAuthenticationRemainingSeconds = 0;
+            HeldOperatorName = null;
+        }
+
+        /// <summary>
+        /// この画面への操作（キー入力・マウスのボタン・ホイール）があったことを知らせる。無操作の時間を数え直す
+        /// </summary>
+        public void NotifyUserActivity()
+        {
+            ResetHeldAuthenticationIdleCountdown();
+        }
+
+        private void ResetHeldAuthenticationIdleCountdown()
+        {
+            if (_heldAuthentication != null)
+            {
+                _heldAuthenticationRemainingSeconds = HeldAuthenticationIdleTimeoutSeconds;
+            }
+        }
+
+        private ITimer CreateHeldAuthenticationTimer()
+        {
+            var timer = _timerFactory.Create();
+            timer.Interval = TimeSpan.FromSeconds(1);
+            timer.Tick += OnHeldAuthenticationTimerTick;
+            return timer;
+        }
+
+        private void OnHeldAuthenticationTimerTick(object? sender, EventArgs e)
+        {
+            if (_heldAuthentication == null)
+            {
+                _heldAuthenticationTimer?.Stop();
+                return;
+            }
+
+            _heldAuthenticationRemainingSeconds = Math.Max(0, _heldAuthenticationRemainingSeconds - 1);
+            if (_heldAuthenticationRemainingSeconds == 0)
+            {
+                ReleaseHeldAuthentication();
+            }
+        }
+
+        /// <summary>
+        /// 画面を閉じるときに保持を破棄し、タイマーを止める（<see cref="Cleanup"/> から呼ぶ）
+        /// </summary>
+        private void CleanupHeldAuthentication()
+        {
+            ReleaseHeldAuthentication();
+            if (_heldAuthenticationTimer != null)
+            {
+                _heldAuthenticationTimer.Stop();
+                _heldAuthenticationTimer.Tick -= OnHeldAuthenticationTimerTick;
+            }
+        }
+    }
+}
