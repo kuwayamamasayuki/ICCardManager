@@ -5,12 +5,12 @@
 **改善**
 - Issue #2494 **職員管理画面（F2）を開いている間は、職員の登録・変更・復元の職員証の認証を最初の 1 回だけにした**。これまでは「保存」のたびに認証を求めており、複数の職員を続けて登録するときに同じ職員が何度も職員証をタッチしていた
   - 最初に認証が要った操作で認証した職員を画面が閉じるまで保持し、2 回目以降は認証ダイアログを出さずに保持している職員の操作として操作ログへ記録する。保持するのは職員だけで、操作者セッションは操作ごとに開始して操作が終わったら閉じる（`StaffAuthResult.ReissueForNextOperation`。操作と操作の間にセッションを残さない。#2260）
-  - 職員一覧の上に「認証中: 氏名（…）」を常に表示し（保持していない間は「職員証の認証: なし（…）」）、「認証を解除」ボタンで保持を破棄できる。この画面へのキー入力・マウスのボタン・ホイールの操作と保持した認証を使った操作が無いまま 5 分たつと破棄する（固定値。マウスの移動は操作とみなさない）。画面を閉じたら（「完了」・×・Esc・初期化の失敗のどれでも）破棄する
+  - 職員一覧の上に「認証中: 氏名（…）」を常に表示し（保持していない間は「職員証の認証: なし（…）」）、「認証を解除」ボタンで保持を破棄できる。この画面へのキー入力・マウスのボタン・ホイールの操作と保持した認証を使った操作が無いまま 5 分たつと破棄する（固定値。マウスの移動は操作とみなさない）。画面を閉じたら（「完了」・×・Esc・初期化の失敗のどれでも）破棄する。無操作は最後の操作の時刻からの経過時間で判定する（スリープ復帰で Tick が飛んでも 5 分を超えていれば破棄。時計が戻ったときも破棄）。閉じた後は保持も認証の要求もしない。表示が変わったら `LiveRegionAnnouncer` で読み上げを発火する
   - 保持を使う前に、保持している職員が削除されていない同じ IDm の職員として登録されているかを DB で確かめ、削除された・職員証が差し替えられた（他の PC の操作を含む）ときは破棄して認証を求め直す。氏名が変わっていれば現在の氏名で記録する
   - 削除と職員証の差し替えは保持を使わず、従来どおり毎回認証を求める（その認証で保持している職員を置き換えもしない）。登録済みの職員が 0 人のときの免除は従来どおりで、免除した登録では保持しない
   - 画面単位で保持すると、認証した職員が画面を開いたまま席を離れた後の別の職員の操作も認証した職員の名前で記録されるため、記録の確からしさが下がることと緩和策を IT担当者ガイド §8.1・管理者マニュアル §1.5・§3.1 に書いた。03_画面設計書 §3.3「認証の保持」・04_機能設計書 §14.6a・07_テスト設計書（UT-152）を更新
-  - 静的検査 `StaffAuthScopeConventionTests` に、認証結果の `Enter()` がどこから得た結果でもその場で `using` で受けられていること・作り直しを呼ぶのは職員管理画面の保持の 1 ファイルだけであることの検査を追加
-  - テスト: `ViewModels/StaffManageViewModelAuthenticationHoldTests` 19 件・`Views/StaffManageDialogHeldAuthenticationLayoutTests` 4 件を新設、`Services/StaffAuthScopeConventionTests` +3 件、UITests の `StaffManageAuthenticationHoldUiTests` 1 件。既存の `StaffManageDialogSingleStaffNoticeLayoutTests` は、左ペインに行を 1 つ足したため行の数と位置の期待値を改めた
+  - 静的検査 `StaffAuthScopeConventionTests` に、認証結果の `Enter()` がどこから得た結果でもその場で `using` で受けられていること・作り直しを呼ぶのは職員管理画面の保持の 1 ファイルだけであること、セッションを伴う認証結果を作る経路（内部コンストラクタ・`CreateAuthenticatedResult`・保持の取り出し）を使ってよいファイルの検査を追加
+  - テスト: `ViewModels/StaffManageViewModelAuthenticationHoldTests` 25 件・`Views/StaffManageDialogHeldAuthenticationLayoutTests` 5 件を新設、`Services/StaffAuthScopeConventionTests` +5 件、UITests の `StaffManageAuthenticationHoldUiTests` 1 件。既存の `StaffManageDialogSingleStaffNoticeLayoutTests` は、左ペインに行を 1 つ足したため行の数と位置の期待値を改めた。`StaffManageViewModel` の構築に `ISystemClock` を足したため、既存の職員管理画面のテスト 5 クラスの構築に時計を渡す（表明は不変）
 
 ### v2.15.0 (2026-11-15)
 

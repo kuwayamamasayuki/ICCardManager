@@ -52,8 +52,23 @@ public class StaffManageViewModelAuthenticationHoldTests : IDisposable
     private readonly Mock<IDialogService> _dialogServiceMock = new();
     private readonly Mock<IStaffAuthService> _staffAuthServiceMock = new();
     private readonly Mock<IOperationLogRepository> _operationLogRepositoryMock = new();
-    private readonly CurrentOperatorContext _operatorContext =
-        new(new FixedSystemClock(new DateTime(2026, 11, 16, 9, 0, 0)));
+    private static readonly DateTime Start = new(2026, 11, 16, 9, 0, 0);
+    private static readonly TimeSpan IdleTimeout =
+        TimeSpan.FromSeconds(StaffManageViewModel.HeldAuthenticationIdleTimeoutSeconds);
+
+    /// <summary>無操作の時間を測る時計（テストで進める）。操作者セッションの絶対上限とは別の時計にする</summary>
+    private readonly FixedSystemClock _clock = new(Start);
+
+    /// <summary>
+    /// 本物の <see cref="CurrentOperatorContext"/> を包み、開始したセッションのスコープが破棄されたかを記録する。
+    /// </summary>
+    /// <remarks>
+    /// セッションは <c>AsyncLocal</c> に持つため、画面の async メソッドの中で開始した値はテストの流れへ戻らず、
+    /// テストから <c>HasSession</c> を見ても常に false になる（スコープを閉じ忘れても緑のまま。レビュー 1 回目で検出）。
+    /// そこでスコープの破棄そのものを表明する。
+    /// </remarks>
+    private readonly RecordingOperatorContext _operatorContext =
+        new(new CurrentOperatorContext(new FixedSystemClock(Start)));
     private readonly List<OperationLog> _operationLogs = new();
     private readonly TestTimerFactory _timerFactory = new();
     private readonly DbContext _dbContext;
@@ -100,7 +115,8 @@ public class StaffManageViewModelAuthenticationHoldTests : IDisposable
             _staffAuthServiceMock.Object,
             new WeakReferenceMessenger(),
             new RecordingDispatcherService(),
-            _timerFactory);
+            _timerFactory,
+            _clock);
     }
 
     public void Dispose()
@@ -255,7 +271,7 @@ public class StaffManageViewModelAuthenticationHoldTests : IDisposable
     }
 
     /// <summary>
-    /// 操作者セッションは操作ごとに開始する: 保持している職員の操作の後、同じ流れに操作者セッションを残さない（Issue #2260）
+    /// 操作者セッションは操作ごとに開始する: 保持している職員の操作の後、そのセッションのスコープを閉じる（Issue #2260）
     /// </summary>
     [Fact]
     public async Task 保持した認証で操作した後に操作者セッションを残さないこと()
@@ -266,7 +282,10 @@ public class StaffManageViewModelAuthenticationHoldTests : IDisposable
         await _viewModel.SaveAsync();
 
         SingleLogFor(SecondIdm, OperationLogger.Actions.Insert).OperatorIdm.Should().Be(HolderIdm);
-        _operatorContext.HasSession.Should().BeFalse("保持するのは職員であってセッションではない");
+        _operatorContext.Sessions.Should().HaveCount(2, "最初の認証の操作と、保持した認証の操作で 1 回ずつ開始する");
+        _operatorContext.Sessions.Should().OnlyContain(session => session.Idm == HolderIdm);
+        _operatorContext.Sessions.Should().OnlyContain(session => session.Disposed,
+            "保持するのは職員であってセッションではない。操作が終わったらスコープを閉じる");
     }
 
     [Fact]
@@ -441,6 +460,51 @@ public class StaffManageViewModelAuthenticationHoldTests : IDisposable
 
     #endregion
 
+    #region 確認を待つ間に閉じた
+
+    /// <summary>
+    /// 保持している職員の確認（DB の読み取り）を待つ間に画面を閉じたら、確認から戻っても認証ダイアログへ進まず、
+    /// 書き込まず、タイマーも動かし直さない（レビュー 1 回目で検出）
+    /// </summary>
+    [Fact]
+    public async Task 保持している職員の確認を待つ間に画面を閉じたら認証を求めず保持もしないこと()
+    {
+        await HoldByFirstRegistrationAsync();
+        var check = new TaskCompletionSource<Staff?>();
+        _staffRepositoryMock.Setup(r => r.GetByIdmAsync(HolderIdm, false)).Returns(check.Task);
+        await EnterNewStaffFormAsync(SecondIdm, "新人 二号");
+
+        var save = _viewModel.SaveAsync();
+        _viewModel.Cleanup();
+        check.SetResult(new Staff { StaffIdm = HolderIdm, Name = HolderName });
+        await save;
+
+        _staffAuthServiceMock.Verify(a => a.RequestAuthenticationAsync(It.IsAny<string>()), Times.Once,
+            "閉じた画面の認証ダイアログを出さない（最初の 1 回だけ）");
+        _staffRepositoryMock.Verify(r => r.InsertAsync(
+            It.Is<Staff>(s => s.StaffIdm == SecondIdm), It.IsAny<SQLiteTransaction>()), Times.Never);
+        _viewModel.IsAuthenticationHeld.Should().BeFalse();
+        HoldTimer.IsRunning.Should().BeFalse("閉じた画面のタイマーを動かし直さない");
+    }
+
+    [Fact]
+    public async Task 画面を閉じた後に認証が完了しても保持しないこと()
+    {
+        await EnterNewStaffFormAsync(FirstIdm, "新人 一号");
+        var auth = new TaskCompletionSource<StaffAuthResult?>();
+        _staffAuthServiceMock.Setup(a => a.RequestAuthenticationAsync("職員の登録")).Returns(auth.Task);
+
+        var save = _viewModel.SaveAsync();
+        _viewModel.Cleanup();
+        auth.SetResult(StaffAuthService.CreateAuthenticatedResult(_operatorContext, HolderIdm, HolderName));
+        await save;
+
+        _viewModel.IsAuthenticationHeld.Should().BeFalse("閉じた画面では保持しない");
+        _timerFactory.LastCreatedTimer.Should().BeNull("閉じた画面のタイマーを作らない・動かさない");
+    }
+
+    #endregion
+
     #region 無操作で破棄する
 
     [Fact]
@@ -448,26 +512,68 @@ public class StaffManageViewModelAuthenticationHoldTests : IDisposable
     {
         await HoldByFirstRegistrationAsync();
         HoldTimer.Interval.Should().Be(TimeSpan.FromSeconds(1));
-
-        HoldTimer.SimulateTicks(StaffManageViewModel.HeldAuthenticationIdleTimeoutSeconds - 1);
-        _viewModel.IsAuthenticationHeld.Should().BeTrue("期限の 1 秒手前では破棄しない");
-
-        HoldTimer.SimulateTick();
-        _viewModel.IsAuthenticationHeld.Should().BeFalse("無操作が 5 分続いたら破棄する");
-        HoldTimer.IsRunning.Should().BeFalse("破棄したらタイマーを止める");
         StaffManageViewModel.HeldAuthenticationIdleTimeoutSeconds.Should().Be(300);
+        var lastActivity = _clock.Now;
+
+        _clock.Now = lastActivity + IdleTimeout - TimeSpan.FromSeconds(1);
+        HoldTimer.SimulateTick();
+        _viewModel.IsAuthenticationHeld.Should().BeTrue("最後の操作から 5 分の 1 秒手前では破棄しない");
+
+        _clock.Now = lastActivity + IdleTimeout;
+        HoldTimer.SimulateTick();
+        _viewModel.IsAuthenticationHeld.Should().BeFalse("最後の操作から 5 分で破棄する");
+        HoldTimer.IsRunning.Should().BeFalse("破棄したらタイマーを止める");
+    }
+
+    /// <summary>
+    /// PC がスリープから復帰したとき、DispatcherTimer は取りこぼした Tick を再生しない。回数ではなく経過時間で判定するので、
+    /// 復帰後の最初の Tick で破棄する（レビュー 1 回目で検出）
+    /// </summary>
+    [Fact]
+    public async Task スリープで時計が飛んでもTick1回で破棄すること()
+    {
+        await HoldByFirstRegistrationAsync();
+
+        _clock.Now += TimeSpan.FromHours(2);
+        HoldTimer.SimulateTick();
+
+        _viewModel.IsAuthenticationHeld.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task Tickが何回来ても時計が進まなければ破棄しないこと()
+    {
+        await HoldByFirstRegistrationAsync();
+
+        HoldTimer.SimulateTicks(StaffManageViewModel.HeldAuthenticationIdleTimeoutSeconds * 2);
+
+        _viewModel.IsAuthenticationHeld.Should().BeTrue("無操作は Tick の回数ではなく経過時間で判定する");
+    }
+
+    [Fact]
+    public async Task 時計が戻ったら保持を破棄すること()
+    {
+        await HoldByFirstRegistrationAsync();
+
+        _clock.Now -= TimeSpan.FromMinutes(1);
+        HoldTimer.SimulateTick();
+
+        _viewModel.IsAuthenticationHeld.Should().BeFalse("経過を確かめられないまま保持を延ばさない");
     }
 
     [Fact]
     public async Task 画面への操作があれば無操作の時間を数え直すこと()
     {
         await HoldByFirstRegistrationAsync();
-        HoldTimer.SimulateTicks(200);
+        _clock.Now += TimeSpan.FromSeconds(200);
 
         _viewModel.NotifyUserActivity();
+        var activity = _clock.Now;
 
-        HoldTimer.SimulateTicks(StaffManageViewModel.HeldAuthenticationIdleTimeoutSeconds - 1);
+        _clock.Now = activity + IdleTimeout - TimeSpan.FromSeconds(1);
+        HoldTimer.SimulateTick();
         _viewModel.IsAuthenticationHeld.Should().BeTrue("操作の時点から数え直す");
+        _clock.Now = activity + IdleTimeout;
         HoldTimer.SimulateTick();
         _viewModel.IsAuthenticationHeld.Should().BeFalse();
     }
@@ -476,12 +582,15 @@ public class StaffManageViewModelAuthenticationHoldTests : IDisposable
     public async Task 保持した認証で操作したら無操作の時間を数え直すこと()
     {
         await HoldByFirstRegistrationAsync();
-        HoldTimer.SimulateTicks(200);
+        _clock.Now += TimeSpan.FromSeconds(200);
 
         await RegisterAsync(SecondIdm, "新人 二号");
+        var activity = _clock.Now;
 
-        HoldTimer.SimulateTicks(StaffManageViewModel.HeldAuthenticationIdleTimeoutSeconds - 1);
+        _clock.Now = activity + IdleTimeout - TimeSpan.FromSeconds(1);
+        HoldTimer.SimulateTick();
         _viewModel.IsAuthenticationHeld.Should().BeTrue();
+        _clock.Now = activity + IdleTimeout;
         HoldTimer.SimulateTick();
         _viewModel.IsAuthenticationHeld.Should().BeFalse();
     }
@@ -496,14 +605,17 @@ public class StaffManageViewModelAuthenticationHoldTests : IDisposable
         await HoldByFirstRegistrationAsync();
         _staffRepositoryMock
             .Setup(r => r.InsertAsync(It.Is<Staff>(s => s.StaffIdm == SecondIdm), It.IsAny<SQLiteTransaction>()))
-            .Callback(() => HoldTimer.SimulateTicks(200))
+            .Callback(() => _clock.Now += TimeSpan.FromSeconds(200))
             .ReturnsAsync(true);
+        var beforeOperation = _clock.Now;
 
         await RegisterAsync(SecondIdm, "新人 二号");
 
-        _viewModel.IsAuthenticationHeld.Should().BeTrue();
-        HoldTimer.SimulateTicks(StaffManageViewModel.HeldAuthenticationIdleTimeoutSeconds - 1);
+        var end = beforeOperation + TimeSpan.FromSeconds(200);
+        _clock.Now = end + IdleTimeout - TimeSpan.FromSeconds(1);
+        HoldTimer.SimulateTick();
         _viewModel.IsAuthenticationHeld.Should().BeTrue("操作が終わった時点から数え直す");
+        _clock.Now = end + IdleTimeout;
         HoldTimer.SimulateTick();
         _viewModel.IsAuthenticationHeld.Should().BeFalse();
     }
@@ -512,7 +624,8 @@ public class StaffManageViewModelAuthenticationHoldTests : IDisposable
     public async Task 無操作で破棄した後の操作では認証を求めること()
     {
         await HoldByFirstRegistrationAsync();
-        HoldTimer.SimulateTicks(StaffManageViewModel.HeldAuthenticationIdleTimeoutSeconds);
+        _clock.Now += IdleTimeout;
+        HoldTimer.SimulateTick();
 
         await RegisterAsync(SecondIdm, "新人 二号");
 
@@ -530,5 +643,83 @@ public class StaffManageViewModelAuthenticationHoldTests : IDisposable
         _timerFactory.LastCreatedTimer.Should().BeNull("保持するまでタイマーを作らない");
     }
 
+    /// <summary>
+    /// 表示の変化（保持・解除・無操作での解除）で <c>HeldAuthenticationText</c> の変更を通知する
+    /// （View はこの通知でスクリーンリーダーへ知らせる。#2142）
+    /// </summary>
+    [Fact]
+    public async Task 保持と解除と無操作での解除で表示の変更を通知すること()
+    {
+        var changes = new List<string>();
+        _viewModel.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(StaffManageViewModel.HeldAuthenticationText))
+            {
+                changes.Add(_viewModel.HeldAuthenticationText);
+            }
+        };
+
+        await HoldByFirstRegistrationAsync();
+        changes.Should().Contain(StaffManageViewModel.BuildHeldAuthenticationText(HolderName), "保持したら通知する");
+
+        changes.Clear();
+        _clock.Now += IdleTimeout;
+        HoldTimer.SimulateTick();
+        changes.Should().Equal(new[] { StaffManageViewModel.NoHeldAuthenticationText }, "無操作で解除したら通知する");
+
+        await RegisterAsync(SecondIdm, "新人 二号");
+        changes.Clear();
+        _viewModel.ReleaseHeldAuthenticationCommand.Execute(null);
+        changes.Should().Equal(new[] { StaffManageViewModel.NoHeldAuthenticationText }, "「認証を解除」で通知する");
+    }
+
     #endregion
+
+    private sealed class RecordingOperatorContext : ICurrentOperatorContext
+    {
+        private readonly ICurrentOperatorContext _inner;
+
+        public RecordingOperatorContext(ICurrentOperatorContext inner) => _inner = inner;
+
+        public List<RecordedSession> Sessions { get; } = new();
+
+        public string? CurrentIdm => _inner.CurrentIdm;
+
+        public string? CurrentName => _inner.CurrentName;
+
+        public bool HasSession => _inner.HasSession;
+
+        public bool TryGetOperator(
+            [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out string? idm,
+            [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out string? name)
+            => _inner.TryGetOperator(out idm, out name);
+
+        public IDisposable BeginSession(string idm, string name)
+        {
+            var session = new RecordedSession(idm, _inner.BeginSession(idm, name));
+            Sessions.Add(session);
+            return session;
+        }
+    }
+
+    private sealed class RecordedSession : IDisposable
+    {
+        private readonly IDisposable _inner;
+
+        public RecordedSession(string idm, IDisposable inner)
+        {
+            Idm = idm;
+            _inner = inner;
+        }
+
+        public string Idm { get; }
+
+        public bool Disposed { get; private set; }
+
+        public void Dispose()
+        {
+            Disposed = true;
+            _inner.Dispose();
+        }
+    }
 }

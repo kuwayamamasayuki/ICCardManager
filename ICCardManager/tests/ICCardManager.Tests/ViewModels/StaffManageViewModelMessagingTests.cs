@@ -55,7 +55,8 @@ public class StaffManageViewModelMessagingTests : IDisposable
             _staffAuthServiceMock.Object,
             _messenger,
             new ICCardManager.Tests.Infrastructure.Timing.RecordingDispatcherService(),
-            new ICCardManager.Tests.Infrastructure.Timing.TestTimerFactory());
+            new ICCardManager.Tests.Infrastructure.Timing.TestTimerFactory(),
+            new ICCardManager.Tests.Infrastructure.Timing.FixedSystemClock(new System.DateTime(2026, 11, 16, 9, 0, 0)));
     }
 
     public void Dispose()

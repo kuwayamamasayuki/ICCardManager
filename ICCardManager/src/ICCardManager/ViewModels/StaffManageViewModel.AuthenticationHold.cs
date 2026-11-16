@@ -30,7 +30,7 @@ namespace ICCardManager.ViewModels
     /// <item><description>画面に「認証中: 氏名」を常に表示する（<see cref="HeldAuthenticationText"/>）</description></item>
     /// <item><description>「認証を解除」で破棄できる（<see cref="ReleaseHeldAuthenticationCommand"/>）</description></item>
     /// <item><description>
-    /// 無操作が <see cref="HeldAuthenticationIdleTimeoutSeconds"/> 秒続いたら破棄する。無操作とは、この画面へのキー入力・
+    /// 無操作が <see cref="HeldAuthenticationIdleTimeoutSeconds"/> 秒続いたら破棄する（最後の操作の時刻からの経過時間で判定）。無操作とは、この画面へのキー入力・
     /// マウスのボタン・ホイールの操作（View が <see cref="NotifyUserActivity"/> を呼ぶ）と、保持した認証を使った操作が
     /// 無いこと
     /// </description></item>
@@ -66,11 +66,27 @@ namespace ICCardManager.ViewModels
         /// </summary>
         private StaffAuthResult? _heldAuthentication;
 
-        /// <summary>無操作のまま破棄するまでの残り秒数を刻むタイマー（初めて保持するときに作る）</summary>
+        /// <summary>無操作の時間を確かめるタイマー（初めて保持するときに作る。1 秒ごと）</summary>
         private ITimer? _heldAuthenticationTimer;
 
-        /// <summary>無操作のまま破棄するまでの残り秒数</summary>
-        private int _heldAuthenticationRemainingSeconds;
+        /// <summary>
+        /// 最後に操作があった時刻（<see cref="_clock"/> の時刻）
+        /// </summary>
+        /// <remarks>
+        /// 無操作の時間は Tick の回数ではなく、この時刻からの経過時間で判定する。PC がスリープから復帰しても
+        /// <c>DispatcherTimer</c> は取りこぼした Tick を再生しないので、回数で数えると実時間で 5 分を超えても保持が残る
+        /// （レビュー 1 回目で検出）。
+        /// </remarks>
+        private DateTime _heldAuthenticationLastActivityAt;
+
+        /// <summary>
+        /// 画面を閉じた（<see cref="Cleanup"/> を呼んだ）か。閉じた後は保持も認証の要求もしない
+        /// </summary>
+        /// <remarks>
+        /// 保持している職員の確認（DB の読み取り）を待つ間に画面を閉じると、確認から戻った流れが認証ダイアログへ進み、
+        /// 認証すると閉じた画面のタイマーを動かし直していた（レビュー 1 回目で検出）。
+        /// </remarks>
+        private bool _isHeldAuthenticationClosed;
 
         /// <summary>
         /// 保持している職員の氏名（保持していなければ null）
@@ -104,7 +120,7 @@ namespace ICCardManager.ViewModels
         private async Task<StaffAuthResult?> TakeHeldAuthenticationAsync()
         {
             var held = _heldAuthentication;
-            if (held == null)
+            if (held == null || _isHeldAuthenticationClosed)
             {
                 return null;
             }
@@ -115,8 +131,8 @@ namespace ICCardManager.ViewModels
                 current = await _staffRepository.GetByIdmAsync(held.Idm);
             }
 
-            // 確かめている間に「認証を解除」・無操作で破棄された、または別の認証に置き換わったなら使わない
-            if (!ReferenceEquals(_heldAuthentication, held))
+            // 確かめている間に「認証を解除」・無操作・画面を閉じたことで破棄された、または別の認証に置き換わったなら使わない
+            if (_isHeldAuthenticationClosed || !ReferenceEquals(_heldAuthentication, held))
             {
                 return null;
             }
@@ -133,6 +149,9 @@ namespace ICCardManager.ViewModels
             ResetHeldAuthenticationIdleCountdown();
             return held.ReissueForNextOperation(name);
         }
+
+        /// <summary>画面を閉じた後か（閉じた後は認証ダイアログへ進まない）</summary>
+        private bool IsHeldAuthenticationClosed => _isHeldAuthenticationClosed;
 
         /// <summary>
         /// 保持している認証があれば、認証ダイアログを出さずにその職員の操作として <paramref name="write"/> を行う
@@ -168,6 +187,12 @@ namespace ICCardManager.ViewModels
         /// </summary>
         private void HoldAuthentication(StaffAuthResult authResult)
         {
+            if (_isHeldAuthenticationClosed)
+            {
+                // 閉じた画面では保持しない（タイマーを動かし直すと、外したハンドラーのまま画面ごと残る）
+                return;
+            }
+
             _heldAuthentication = authResult;
             HeldOperatorName = authResult.StaffName;
             ResetHeldAuthenticationIdleCountdown();
@@ -185,7 +210,6 @@ namespace ICCardManager.ViewModels
         {
             _heldAuthentication = null;
             _heldAuthenticationTimer?.Stop();
-            _heldAuthenticationRemainingSeconds = 0;
             HeldOperatorName = null;
         }
 
@@ -201,7 +225,7 @@ namespace ICCardManager.ViewModels
         {
             if (_heldAuthentication != null)
             {
-                _heldAuthenticationRemainingSeconds = HeldAuthenticationIdleTimeoutSeconds;
+                _heldAuthenticationLastActivityAt = _clock.Now;
             }
         }
 
@@ -221,8 +245,10 @@ namespace ICCardManager.ViewModels
                 return;
             }
 
-            _heldAuthenticationRemainingSeconds = Math.Max(0, _heldAuthenticationRemainingSeconds - 1);
-            if (_heldAuthenticationRemainingSeconds == 0)
+            // 経過時間で判定する（スリープからの復帰で Tick が飛んでも、最初の Tick で破棄する）。
+            // 時計が戻った（経過時間が負）ときも破棄する — 経過を確かめられないまま保持を延ばさない
+            var idle = _clock.Now - _heldAuthenticationLastActivityAt;
+            if (idle < TimeSpan.Zero || idle >= TimeSpan.FromSeconds(HeldAuthenticationIdleTimeoutSeconds))
             {
                 ReleaseHeldAuthentication();
             }
@@ -233,6 +259,7 @@ namespace ICCardManager.ViewModels
         /// </summary>
         private void CleanupHeldAuthentication()
         {
+            _isHeldAuthenticationClosed = true;
             ReleaseHeldAuthentication();
             if (_heldAuthenticationTimer != null)
             {

@@ -70,7 +70,8 @@ public class StaffManageViewModelSingleStaffNoticeTests : IDisposable
             _staffAuthServiceMock.Object,
             new WeakReferenceMessenger(),
             new RecordingDispatcherService(),
-            new TestTimerFactory());
+            new TestTimerFactory(),
+            new FixedSystemClock(new DateTime(2026, 11, 16, 9, 0, 0)));
     }
 
     public void Dispose()

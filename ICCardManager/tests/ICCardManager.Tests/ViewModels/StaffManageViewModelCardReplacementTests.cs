@@ -105,7 +105,8 @@ public class StaffManageViewModelCardReplacementTests : IDisposable
             _staffAuthServiceMock.Object,
             _messenger,
             new RecordingDispatcherService(),
-            _timerFactory);
+            _timerFactory,
+            new FixedSystemClock(new DateTime(2026, 11, 16, 9, 0, 0)));
     }
 
     public void Dispose()

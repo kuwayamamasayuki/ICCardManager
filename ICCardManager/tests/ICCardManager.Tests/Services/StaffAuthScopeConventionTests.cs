@@ -49,7 +49,25 @@ public class StaffAuthScopeConventionTests
     /// （<c>using var r = (await TakeHeldAuthenticationAsync())?.Enter();</c>）。
     /// </summary>
     private static readonly Regex ScopedHeldAuthCallPattern = new Regex(
-        @"using\s*(?:\(\s*)?var\s+\w+\s*=\s*\(\s*await\s+[\w.]+\(\s*\)\s*\)\s*\?\.\s*Enter\(\s*\)");
+        @"using\s*(?:\(\s*)?var\s+\w+\s*=\s*\(\s*await\s+TakeHeldAuthenticationAsync\(\s*\)\s*\)\s*\?\.\s*Enter\(\s*\)");
+
+    /// <summary>
+    /// 操作者セッションを伴う認証結果を作る呼び出し（Issue #2494 のレビュー 1 回目）。作ってよいファイルを固定する:
+    /// 認証の内部コンストラクタ <c>new StaffAuthResult(…)</c>（引数あり）・<c>CreateAuthenticatedResult</c>・
+    /// 保持の取り出し <c>TakeHeldAuthenticationAsync</c>。引数の無い <c>new StaffAuthResult()</c> / 初期化子はセッションを
+    /// 伴わないので対象外。
+    /// </summary>
+    private static readonly (Regex Pattern, string Description, string[] AllowedRelativePaths)[] SessionResultFactories =
+    {
+        (new Regex(@"\bnew\s+StaffAuthResult\s*\(\s*[^)\s]"), "new StaffAuthResult(…)（引数あり）",
+            new[] { Path.Combine("Services", "StaffAuthResult.cs"), Path.Combine("Services", "StaffAuthService.cs") }),
+        (new Regex(@"\bCreateAuthenticatedResult\s*\("), "CreateAuthenticatedResult",
+            new[] { Path.Combine("Services", "StaffAuthService.cs") }),
+        (new Regex(@"\bTakeHeldAuthenticationAsync\s*\("), "TakeHeldAuthenticationAsync",
+            new[] { Path.Combine("ViewModels", "StaffManageViewModel.AuthenticationHold.cs") }),
+        (new Regex(@"\.?\bReissueForNextOperation\s*\("), "ReissueForNextOperation",
+            new[] { Path.Combine("Services", "StaffAuthResult.cs"), Path.Combine("ViewModels", "StaffManageViewModel.AuthenticationHold.cs") }),
+    };
 
     /// <summary>保持している認証から次の 1 操作の結果を作る呼び出し（Issue #2494）。</summary>
     private static readonly Regex ReissueCallPattern = new Regex(@"\.ReissueForNextOperation\(");
@@ -144,6 +162,60 @@ public class StaffAuthScopeConventionTests
     }
 
     /// <summary>
+    /// Issue #2494（レビュー 1 回目）: セッションを伴う認証結果を作る経路（内部コンストラクタ・<c>CreateAuthenticatedResult</c>・
+    /// 保持の取り出し・作り直し）は、決まったファイルからしか使わないこと。
+    /// </summary>
+    /// <remarks>
+    /// <c>Enter()</c> の検査は「using で受けているか」しか見ないので、画面のファイルで認証結果を作り直して using で受ければ、
+    /// 認証の要求を経ずに操作者を名乗れる。作る経路そのものを置き場所で縛る。
+    /// </remarks>
+    [Fact]
+    public void セッションを伴う認証結果を作る経路は決まったファイルだけが使うこと()
+    {
+        var root = TestPaths.GetProductionSourceRoot();
+        var sources = EnumerateProductionSources().Select(f => (File: f, Code: ReadCode(f))).ToList();
+
+        var violations = new List<string>();
+        foreach (var (pattern, description, allowed) in SessionResultFactories)
+        {
+            var allowedFull = allowed.Select(a => Path.GetFullPath(Path.Combine(root, a))).ToList();
+            violations.AddRange(sources
+                .Where(x => pattern.IsMatch(x.Code))
+                .Where(x => !allowedFull.Contains(Path.GetFullPath(x.File), StringComparer.OrdinalIgnoreCase))
+                .Select(x => $"  - {RelativePath(x.File)}: {description}"));
+        }
+
+        violations.Should().BeEmpty(
+            "操作者セッションを伴う認証結果は、認証サービス（認証の要求）と職員管理画面の保持だけが作る（Issue #2260 / #2494）。\n" +
+            string.Join("\n", violations));
+    }
+
+    /// <summary>
+    /// 対の表明: 作る経路の検査が実際の置き場所を拾い、迂回の形（画面のファイルでの作り直し）を違反と数えること。
+    /// </summary>
+    [Fact]
+    public void 作る経路の検査は実際の置き場所を拾い迂回の形を数えること()
+    {
+        var root = TestPaths.GetProductionSourceRoot();
+        foreach (var (pattern, description, allowed) in SessionResultFactories)
+        {
+            allowed.Any(a => pattern.IsMatch(ReadCode(Path.Combine(root, a)))).Should().BeTrue(
+                $"{description} を許可したファイルで実際に拾えていること（拾えなければ検査が空振りする）");
+        }
+
+        const string bypass =
+            "var r = StaffAuthService.CreateAuthenticatedResult(_context, idm, name);\n" +
+            "var s = new StaffAuthResult(idm, name, _context);\n" +
+            "var t = await TakeHeldAuthenticationAsync();\n" +
+            "var u = _held.ReissueForNextOperation(name);\n" +
+            "var ok = new StaffAuthResult();\n" +
+            "var ok2 = new StaffAuthResult { Idm = idm };\n";
+        SessionResultFactories.Count(f => f.Pattern.IsMatch(bypass)).Should().Be(4, "4 つの経路をそれぞれ拾う");
+        SessionResultFactories.Sum(f => f.Pattern.Matches(bypass).Count).Should().Be(4,
+            "引数の無いコンストラクタ・初期化子はセッションを伴わないので数えない");
+    }
+
+    /// <summary>
     /// Issue #2494: Enter() の検査を既知のサンプル入力で固定する。
     /// </summary>
     [Fact]
@@ -151,14 +223,15 @@ public class StaffAuthScopeConventionTests
     {
         const string sample =
             "using var a = (await TakeHeldAuthenticationAsync())?.Enter();\n" +
+            "using var e = (await AnyOtherAsync())?.Enter();\n" +
             "using var b = (await _staffAuthService.RequestAuthenticationAsync(\"職員の登録\"))?.Enter();\n" +
             "var c = (await TakeHeldAuthenticationAsync())?.Enter();\n" +
             "using var d = _held.ReissueForNextOperation(name).Enter();\n" +
             "public StaffAuthResult Enter()\n";
 
-        EnterCallPattern.Matches(sample).Count.Should().Be(4, "宣言は呼び出しとして数えない");
+        EnterCallPattern.Matches(sample).Count.Should().Be(5, "宣言は呼び出しとして数えない");
         (ScopedAuthCallPattern.Matches(sample).Count + ScopedHeldAuthCallPattern.Matches(sample).Count).Should().Be(2,
-            "using で受けない形・await の結果でない形は決まった形として数えない");
+            "using で受けない形・await の結果でない形・保持の取り出し以外の引数無しの await は決まった形として数えない");
     }
 
     /// <summary>

@@ -108,4 +108,19 @@ public class StaffManageDialogHeldAuthenticationLayoutTests
                 @"void\s+Dialog_UserActivity\([^)]*\)\s*\{\s*_viewModel\.NotifyUserActivity\(\);\s*\}")
             .Should().BeTrue("ハンドラは ViewModel へ操作があったことを知らせるだけ（イベントを処理済みにしない）");
     }
+
+    /// <summary>
+    /// 表示の変化をスクリーンリーダーへ知らせる: LiveSetting だけでは LiveRegionChanged は発火しないので、
+    /// <c>HeldAuthenticationText</c> の変更通知で <c>LiveRegionAnnouncer</c> を呼ぶこと（ui-conventions #2142。レビュー 1 回目で検出）
+    /// </summary>
+    [Fact]
+    public void 保持の表示の変化はLiveRegionAnnouncerで知らせること()
+    {
+        var codeBehind = File.ReadAllText(Path.ChangeExtension(StaffManageDialogXamlPath, ".xaml.cs"));
+        var code = TestSourceInspection.RemoveCommentsPreservingLines(codeBehind);
+
+        System.Text.RegularExpressions.Regex.IsMatch(code,
+                @"if\s*\(\s*e\.PropertyName\s*==\s*nameof\(\s*StaffManageViewModel\.HeldAuthenticationText\s*\)\s*\)\s*\{\s*LiveRegionAnnouncer\.Announce\(\s*HeldAuthenticationText\s*,")
+            .Should().BeTrue("表示の変更通知を受けて、表示している TextBlock（x:Name=HeldAuthenticationText）の変化を知らせる");
+    }
 }

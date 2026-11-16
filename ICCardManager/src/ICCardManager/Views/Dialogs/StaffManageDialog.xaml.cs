@@ -194,6 +194,13 @@ namespace ICCardManager.Views.Dialogs
         /// </summary>
         private void ViewModel_PropertyChanged(object sender, PropertyChangedEventArgs e)
         {
+            // Issue #2494: 認証の保持の表示が変わった（認証して保持した・「認証を解除」・無操作で解除・氏名の変更）ことを
+            // スクリーンリーダーへ知らせる。LiveSetting だけでは LiveRegionChanged は発火しない（#2142）
+            if (e.PropertyName == nameof(StaffManageViewModel.HeldAuthenticationText))
+            {
+                LiveRegionAnnouncer.Announce(HeldAuthenticationText, "職員証の認証の保持のスクリーンリーダー通知");
+            }
+
             if (e.PropertyName == nameof(StaffManageViewModel.NewlyRegisteredIdm)
                 && _viewModel.NewlyRegisteredIdm != null)
             {

@@ -100,7 +100,8 @@ public class StaffManageViewModelTests : IDisposable
             _staffAuthServiceMock.Object,
             messenger,
             _dispatcher,
-            _timerFactory);
+            _timerFactory,
+            new FixedSystemClock(new DateTime(2026, 11, 16, 9, 0, 0)));
     }
 
     public void Dispose()

@@ -191,6 +191,9 @@ namespace ICCardManager.ViewModels
         /// <summary>職員証の差し替えのタッチ待ちの残り時間を刻むタイマーの生成（Issue #2461）</summary>
         private readonly ITimerFactory _timerFactory;
 
+        /// <summary>認証の保持の無操作の時間を測る時計（Issue #2494）</summary>
+        private readonly ISystemClock _clock;
+
         /// <summary>職員証の差し替えのタッチ待ちの残り時間を刻むタイマー（初めて待つときに作る）</summary>
         private ITimer? _replacementCardTimer;
 
@@ -211,8 +214,11 @@ namespace ICCardManager.ViewModels
             IStaffAuthService staffAuthService,
             IMessenger messenger,
             IDispatcherService dispatcherService,
-            ITimerFactory timerFactory)
+            ITimerFactory timerFactory,
+            ISystemClock clock)
         {
+            // 省略可能にすると DI の配線漏れが「無操作でも認証の保持が解除されない」形で潜在化する（#1820）
+            _clock = clock ?? throw new ArgumentNullException(nameof(clock));
             // 省略可能にすると DI の配線漏れが「差し替えのタッチ待ちが時間切れにならない」形で潜在化する（#1820）
             _timerFactory = timerFactory ?? throw new ArgumentNullException(nameof(timerFactory));
             _staffRepository = staffRepository;
@@ -431,6 +437,12 @@ namespace ICCardManager.ViewModels
 
                         if (!authorized)
                         {
+                            if (IsHeldAuthenticationClosed)
+                            {
+                                // Issue #2494: 画面を閉じた後は案内を出さない（認証も求めていない）
+                                return true;
+                            }
+
                             _dialogService.ShowInformation(
                                 BuildRestoreAuthenticationCancelledMessage(
                                     identifier, "もう一度この職員証をタッチし"),
@@ -842,6 +854,12 @@ namespace ICCardManager.ViewModels
                 return true;
             }
 
+            // Issue #2494: 保持している職員の確認を待つ間に画面を閉じたら、閉じた画面の認証ダイアログを出さない
+            if (IsHeldAuthenticationClosed)
+            {
+                return false;
+            }
+
             using var authResult = (await _staffAuthService.RequestAuthenticationAsync("職員の登録"))?.Enter();
             if (authResult == null)
             {
@@ -870,6 +888,12 @@ namespace ICCardManager.ViewModels
             if (await TryRunWithHeldAuthenticationAsync(write))
             {
                 return true;
+            }
+
+            // Issue #2494: 保持している職員の確認を待つ間に画面を閉じたら、閉じた画面の認証ダイアログを出さない
+            if (IsHeldAuthenticationClosed)
+            {
+                return false;
             }
 
             using var authResult = (await _staffAuthService.RequestAuthenticationAsync("職員情報の変更"))?.Enter();
@@ -904,6 +928,12 @@ namespace ICCardManager.ViewModels
             if (await TryRunWithHeldAuthenticationAsync(write))
             {
                 return true;
+            }
+
+            // Issue #2494: 保持している職員の確認を待つ間に画面を閉じたら、閉じた画面の認証ダイアログを出さない
+            if (IsHeldAuthenticationClosed)
+            {
+                return false;
             }
 
             using var authResult = (await _staffAuthService.RequestAuthenticationAsync("職員の復元"))?.Enter();
